@@ -33,49 +33,50 @@
   let isProcessing = false;
 
   async function onScanSuccess(decodedText) {
-    if (isProcessing) return;
-    isProcessing = true;
+  if (isProcessing) return;
+  isProcessing = true;
 
-    const statusDiv = document.getElementById('status');
-    const operator = document.getElementById('scannerOperator').value || 'Default Scanner';
+  const statusDiv = document.getElementById('status');
+  const operator = document.getElementById('scannerOperator').value || 'Default Scanner';
 
-    statusDiv.className = 'ready';
-    statusDiv.innerText = "Verifying Token...";
+  statusDiv.className = 'ready';
+  statusDiv.innerText = "Verifying Token...";
 
-    try {
-      const response = await fetch(WEB_APP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ 
-          id: decodedText.trim(),
-          scannedBy: operator 
-        })
-      });
-      
-      const data = await response.json();
+  try {
+    // Send data as standard URLSearchParams body (no header conflicts on iOS)
+    const payload = new URLSearchParams();
+    payload.append('id', decodedText.trim());
+    payload.append('scannedBy', operator);
 
-      if (data.status === 'ok') {
-        statusDiv.className = 'success';
-        statusDiv.innerText = `✅ CHECKED IN: ${data.name} (${data.affiliation || 'No Affiliation'})`;
-      } else if (data.status === 'duplicate') {
-        statusDiv.className = 'warning';
-        statusDiv.innerText = `⚠️ ALREADY SCANNED: ${data.name}`;
-      } else if (data.status === 'unknown') {
-        statusDiv.className = 'error';
-        statusDiv.innerText = `❌ INVALID TOKEN`;
-      } else {
-        statusDiv.className = 'error';
-        statusDiv.innerText = `Error: ${data.status}`;
-      }
-    } catch (err) {
+    const response = await fetch(WEB_APP_URL, {
+      method: 'POST',
+      body: payload
+    });
+    
+    const data = await response.json();
+
+    if (data.status === 'ok') {
+      statusDiv.className = 'success';
+      statusDiv.innerText = `✅ CHECKED IN: ${data.name} (${data.affiliation || 'No Affiliation'})`;
+    } else if (data.status === 'duplicate') {
+      statusDiv.className = 'warning';
+      statusDiv.innerText = `⚠️ ALREADY SCANNED: ${data.name}`;
+    } else if (data.status === 'unknown') {
       statusDiv.className = 'error';
-      statusDiv.innerText = 'Network error: ' + err.message;
-    } finally {
-      setTimeout(() => { 
-        isProcessing = false; 
-      }, 2500);
+      statusDiv.innerText = `❌ INVALID TOKEN`;
+    } else {
+      statusDiv.className = 'error';
+      statusDiv.innerText = `Error: ${data.status}`;
     }
+  } catch (err) {
+    statusDiv.className = 'error';
+    statusDiv.innerText = 'Network error: ' + err.message;
+  } finally {
+    setTimeout(() => { 
+      isProcessing = false; 
+    }, 2500);
   }
+}
 
   const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
   html5QrcodeScanner.render(onScanSuccess);
