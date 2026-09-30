@@ -1,86 +1,134 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Event QR Check-In</title>
-  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 20px; background-color: #f4f6f8; }
-    .card { max-width: 480px; margin: 0 auto; background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-    #reader { width: 100%; margin: 15px 0; border-radius: 8px; overflow: hidden; }
-    input { width: 90%; padding: 10px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
-    #status { font-weight: bold; margin-top: 15px; padding: 12px; border-radius: 6px; font-size: 15px; }
-    .ready { background: #e9ecef; color: #495057; }
-    .success { background: #d4edda; color: #155724; }
-    .warning { background: #fff3cd; color: #856404; }
-    .error { background: #f8d7da; color: #721c24; }
-  </style>
-</head>
-<body>
-
-<div class="card">
-  <h2>Event Check-In</h2>
-  <input type="text" id="scannerOperator" placeholder="Scanner Operator / Gate (e.g., Gate A)">
+/**
+ * Executes on Form Submit.
+ * Evaluates attendance:
+ * - If "Yes,  I'll be there": Generates UUID token, emails QR code, marks "YES" in Col J.
+ * - If "Sorry, can't make it": Marks "N/A (Not Attending)" in Col I & J.
+ */
+function onFormSubmit(e) {
+  const sheet = e.range.getSheet();
+  const row = e.range.getRow();
   
-  <div id="reader"></div>
-  <div id="status" class="ready">Ready to scan...</div>
-</div>
+  // 1-based column indices for writing results back
+  const TOKEN_COL = 9;       // Col I: QR Token
+  const EMAIL_SENT_COL = 10; // Col J: Email Sent
 
-<script>
-  // Replace with your Google Apps Script Web App URL from Step 3
-  const WEB_APP_URL = '://script.google.com/a/macros/citycancerchallenge.org/s/AKfycbwwSDFbpL-XuYwAx2_l1vcF3zIAFo9oGkejaCBg-g-AnVHrGpMn-9ony3B9yItDzWM/exec';
-  let isProcessing = false;
+  // Safely extract values directly from the event object 'e'
+  // Fallbacks provided using array values if e.namedValues isn't available
+  const canAttend = e.namedValues ? (e.namedValues['Can you attend?'] ? e.namedValues['Can you attend?'][0] : '') : (e.values[2] || '');
+  const email = e.namedValues ? (e.namedValues['Email address'] ? e.namedValues['Email address'][0] : '') : (e.values[1] || '');
+  const name = e.namedValues ? (e.namedValues['Full Name'] ? e.namedValues['Full Name'][0] : '') : (e.values[3] || '');
 
-  async function onScanSuccess(decodedText) {
-  if (isProcessing) return;
-  isProcessing = true;
+  const cleanAttend = String(canAttend).trim();
 
-  const statusDiv = document.getElementById('status');
-  const operator = document.getElementById('scannerOperator').value || 'Default Scanner';
+  // Case 1: Participant cannot attend
+  if (cleanAttend.toLowerCase().includes("can't make it") || cleanAttend.toLowerCase().includes("sorry")) {
+    sheet.getRange(row, TOKEN_COL).setValue("N/A (Not Attending)");
+    sheet.getRange(row, EMAIL_SENT_COL).setValue("N/A (Not Attending)");
+    return;
+  }
 
-  statusDiv.className = 'ready';
-  statusDiv.innerText = "Verifying Token...";
+  // Case 2: Participant confirmed attendance ("Yes,  I'll be there")
+  if (cleanAttend.toLowerCase().startsWith("yes")) {
+    const qrToken = Utilities.getUuid();
+    sheet.getRange(row, TOKEN_COL).setValue(qrToken);
 
-  try {
-    // Send data as standard URLSearchParams body (no header conflicts on iOS)
-    const payload = new URLSearchParams();
-    payload.append('id', decodedText.trim());
-    payload.append('scannedBy', operator);
+    if (email.trim()) {
+      const qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + encodeURIComponent(qrToken);
+      const qrBlob = UrlFetchApp.fetch(qrUrl).getBlob().setName("QRCode.png");
 
-    const response = await fetch(WEB_APP_URL, {
-      method: 'POST',
-      body: payload
-    });
-    
-    const data = await response.json();
+      MailApp.sendEmail({
+        to: email.trim(),
+        subject: "Your Event Check-In QR Code",
+        htmlBody: `<p>Hi <strong>${name}</strong>,</p>` +
+                  `<p>Thank you for confirming your attendance! Please present the attached QR code at check-in.</p>` +
+                  `<p><strong>Token ID:</strong> <code>${qrToken}</code></p>`,
+        attachments: [qrBlob]
+      });
 
-    if (data.status === 'ok') {
-      statusDiv.className = 'success';
-      statusDiv.innerText = `✅ CHECKED IN: ${data.name} (${data.affiliation || 'No Affiliation'})`;
-    } else if (data.status === 'duplicate') {
-      statusDiv.className = 'warning';
-      statusDiv.innerText = `⚠️ ALREADY SCANNED: ${data.name}`;
-    } else if (data.status === 'unknown') {
-      statusDiv.className = 'error';
-      statusDiv.innerText = `❌ INVALID TOKEN`;
-    } else {
-      statusDiv.className = 'error';
-      statusDiv.innerText = `Error: ${data.status}`;
+      sheet.getRange(row, EMAIL_SENT_COL).setValue('YES');
     }
-  } catch (err) {
-    statusDiv.className = 'error';
-    statusDiv.innerText = 'Network error: ' + err.message;
-  } finally {
-    setTimeout(() => { 
-      isProcessing = false; 
-    }, 2500);
   }
 }
 
-  const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-  html5QrcodeScanner.render(onScanSuccess);
-</script>
+/**
+ * Web App Endpoint for processing check-ins from the HTML scanner page.
+ */
+function doPost(e) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
 
-</body>
-</html>
+  let res;
+  try {
+    let scannedToken = '';
+    let scannerUser = '';
+
+    // Handle incoming parameters safely across all mobile browsers
+    if (e.parameter && e.parameter.id) {
+      scannedToken = e.parameter.id.trim();
+      scannerUser = (e.parameter.scannedBy || 'Gate 1').trim();
+    } else if (e.postData && e.postData.contents) {
+      try {
+        const payload = JSON.parse(e.postData.contents);
+        scannedToken = (payload.id || '').trim();
+        scannerUser = (payload.scannedBy || 'Gate 1').trim();
+      } catch (jsonErr) {
+        // Fallback if URLSearchParams posted raw string
+        scannedToken = e.postData.contents.trim();
+      }
+    }
+
+    // Guard Clause: Prevent blank/empty string matching against empty sheet cells
+    if (!scannedToken || scannedToken === "N/A (Not Attending)") {
+      res = { status: 'unknown' };
+      return ContentService.createTextOutput(JSON.stringify(res))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const ss = SpreadsheetApp.getActive();
+    const respSheet = ss.getSheetByName('Form responses 1');
+    const respData = respSheet.getDataRange().getValues();
+
+    // 0-based array indices for 'Form responses 1'
+    const TOKEN_INDEX = 8;  // Col I (QR Token)
+    const NAME_INDEX = 3;   // Col D (Full Name)
+    const AFFIL_INDEX = 4;  // Col E (Affiliation)
+    const ROLE_INDEX = 5;   // Col F (Role/Position)
+
+    // Search for registrant matching scanned token
+    const person = respData.find(row => String(row[TOKEN_INDEX]).trim() === scannedToken);
+
+    const attSheet = ss.getSheetByName('Attendance');
+    const attData = attSheet.getDataRange().getValues();
+
+    if (!person) {
+      res = { status: 'unknown' };
+    } else if (attData.some(row => String(row[0]).trim() === scannedToken)) {
+      res = { 
+        status: 'duplicate', 
+        name: person[NAME_INDEX] 
+      };
+    } else {
+      attSheet.appendRow([
+        scannedToken,
+        person[NAME_INDEX],
+        person[AFFIL_INDEX],
+        person[ROLE_INDEX],
+        new Date(),
+        scannerUser
+      ]);
+
+      res = { 
+        status: 'ok', 
+        name: person[NAME_INDEX],
+        affiliation: person[AFFIL_INDEX]
+      };
+    }
+  } catch (err) {
+    res = { status: 'error', message: err.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+
+  return ContentService.createTextOutput(JSON.stringify(res))
+    .setMimeType(ContentService.MimeType.JSON);
+}
