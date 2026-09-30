@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Event check-in</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:480px;margin:auto;padding:16px}
+  input{width:100%;padding:10px;font-size:1rem;box-sizing:border-box;margin-bottom:12px}
+  #result{margin-top:16px;padding:20px;border-radius:12px;font-size:1.4rem;text-align:center;background:#eee}
+  .ok{background:#c8f7c5}.duplicate{background:#ffe9a8}.unknown,.error{background:#f7c5c5}
+</style>
+</head>
+<body>
+<h2>Event check-in</h2>
+<input id="staff" placeholder="Your name (staff)">
+<div id="reader"></div>
+<div id="result">Ready to scan</div>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+const ENDPOINT = 'https://script.google.com/a/macros/citycancerchallenge.org/s/AKfycbxl_zP2_TIVav1AaLLBaawkvdWolmp5OpWon56K8DYRpnzwmwDgV8o3qgBnz1BdpCTf/exec';
+let busy = false;
+const box = document.getElementById('result');
+
+async function onScan(text) {
+  if (busy) return;
+  busy = true;
+  box.className = ''; box.textContent = 'Checking...';
+  try {
+    const r = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({id: text, staff: document.getElementById('staff').value})
+    });
+    const d = await r.json();
+    const msg = {ok: 'Checked in: ', duplicate: 'ALREADY scanned: ', unknown: 'Unknown code'}[d.status];
+    box.className = d.status;
+    box.textContent = msg + (d.name || '') + (d.affiliation ? ' (' + d.affiliation + ')' : '');
+  } catch (err) {
+    box.className = 'error';
+    box.textContent = 'Network error - use printed list';
+  }
+  setTimeout(() => { busy = false; }, 2500);
+}
+
+const scanner = new Html5Qrcode('reader');
+scanner.start({facingMode: 'environment'}, {fps: 10, qrbox: 250}, onScan)
+  .catch(err => { box.className = 'error'; box.textContent = 'Camera error: ' + err; });
+</script>
+</body>
+</html>
