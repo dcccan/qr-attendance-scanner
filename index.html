@@ -1,3 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Event QR Check-In Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+      text-align: center; 
+      padding: 16px; 
+      background-color: #f4f6f8; 
+      margin: 0;
+    }
+    .card { 
+      max-width: 480px; 
+      margin: 0 auto; 
+      background: white; 
+      padding: 20px; 
+      border-radius: 16px; 
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08); 
+    }
+    h2 { margin-top: 0; color: #1a1a1a; font-size: 1.4rem; }
+    input { 
+      width: 100%; 
+      padding: 12px; 
+      margin-bottom: 12px; 
+      border: 1px solid #ccc; 
+      border-radius: 8px; 
+      font-size: 15px; 
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: #007aff; }
+    #reader { 
+      width: 100%; 
+      margin: 10px 0; 
+      border-radius: 12px; 
+      overflow: hidden; 
+      background: #000;
+    }
+    #status { 
+      font-weight: 600; 
+      margin-top: 15px; 
+      padding: 14px; 
+      border-radius: 8px; 
+      font-size: 1rem; 
+      transition: all 0.2s ease-in-out;
+    }
+    .ready { background: #e9ecef; color: #495057; }
+    .verifying { background: #cce5ff; color: #004085; }
+    .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .warning { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+    .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>C/Can Event Check-In Scanner</h2>
+  <input type="text" id="scannerOperator" placeholder="Organiser @ Quezon City">
+  
+  <div id="reader"></div>
+  <div id="status" class="ready">Ready to scan...</div>
+</div>
+
 <script>
   // Active Google Apps Script Web App Endpoint
   const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyk0lYLhmg1sTVwgmSV2VM5IJhoN_fxQQJJlGWsiFER_Qfk3n7GLGJoMCVbFJA93HkL/exec';
@@ -39,7 +107,7 @@
     const operator = document.getElementById('scannerOperator').value || 'C/Can in Quezon City';
 
     statusDiv.className = 'verifying';
-    statusDiv.innerText = "⏳ Verifying Token...";
+    statusDiv.innerText = "⏳ Recording Scan...";
 
     try {
       const payload = new URLSearchParams();
@@ -61,14 +129,12 @@
         throw new Error('Apps Script permissions error. Make sure "Who has access" is set to "Anyone" and deployed as a New Version.');
       }
 
-      if (data.status === 'ok') {
+      // Treat both 'ok' and 'duplicate' as valid scans for multiple scan support
+      if (data.status === 'ok' || data.status === 'duplicate') {
         statusDiv.className = 'success';
-        statusDiv.innerText = `✅ CHECKED IN: ${data.name} (${data.affiliation || 'No Affiliation'})`;
+        const scanCountInfo = data.scanCount ? ` (Scan #${data.scanCount})` : '';
+        statusDiv.innerText = `✅ LOGGED: ${data.name} (${data.affiliation || 'No Affiliation'})${scanCountInfo}`;
         playSound('success');
-      } else if (data.status === 'duplicate') {
-        statusDiv.className = 'warning';
-        statusDiv.innerText = `⚠️ ALREADY CHECKED IN: ${data.name}`;
-        playSound('warning');
       } else if (data.status === 'unknown') {
         statusDiv.className = 'error';
         statusDiv.innerText = `❌ INVALID OR UNKNOWN QR CODE`;
@@ -93,7 +159,7 @@
     }
   }
 
-  // Initialize lower-level Html5Qrcode reader to specify rear camera directly
+  // Initialize lower-level Html5Qrcode to target the rear camera
   const html5QrCode = new Html5Qrcode("reader");
 
   const config = { 
@@ -101,12 +167,20 @@
     qrbox: { width: 250, height: 250 } 
   };
 
-  // Force back camera via { facingMode: "environment" }
+  // Force environment-facing (rear) camera
   html5QrCode.start(
     { facingMode: "environment" }, 
     config, 
     onScanSuccess
   ).catch(err => {
-    console.error("Unable to start scanning with rear camera:", err);
+    console.error("Unable to start scanning with back camera:", err);
+    // Fallback: If environment facing camera is unavailable, try default/user camera
+    html5QrCode.start({ facingMode: "user" }, config, onScanSuccess).catch(e => {
+      document.getElementById('status').innerText = "Camera access denied or unavailable.";
+      document.getElementById('status').className = 'error';
+    });
   });
 </script>
+
+</body>
+</html>
